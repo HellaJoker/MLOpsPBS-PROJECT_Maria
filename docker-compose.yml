@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  mlflow-app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: container-ml
+    ports:
+      - "3000:3000"
+    volumes:
+      # Sincroniza o banco de dados e a pasta de artefatos com sua máquina local
+      - ./db:/app/db
+      - ./artifacts:/app/artifacts

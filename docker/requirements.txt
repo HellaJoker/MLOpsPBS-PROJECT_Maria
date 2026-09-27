@@ -1,0 +1,5 @@
+mlflow
+scikit-learn
+pandas
+joblib
+flask  # ou fastapi, dependendo do framework usado no app.py
