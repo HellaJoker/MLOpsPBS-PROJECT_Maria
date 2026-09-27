@@ -1,4 +1,8 @@
+import hashlib
+import logging
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -17,6 +21,14 @@ app = FastAPI(title="FitCheck Microservice", version="1.1.0")
 MODEL_DIR = Path(os.getenv("MODEL_DIR", Path(__file__).resolve().parent.parent / "Models"))
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# uvicorn's logger, so every prediction shows up in `docker compose logs -f api`
+log = logging.getLogger("uvicorn.error")
+
+MODEL_FILES = {
+    "baseline": "fitcheck_gb_model.joblib",
+    "optimized": "fitcheck_gb_model_optimized.joblib",
+}
+
 
 def _load(filename):
     """Load a joblib artifact, returning None (and logging why) if it is missing or broken."""
@@ -24,21 +36,42 @@ def _load(filename):
     try:
         return joblib.load(path)
     except Exception as exc:
-        print(f"[fitcheck] could not load {path}: {exc}")
+        log.warning("[fitcheck] could not load %s: %s", path, exc)
         return None
 
 
+def _fingerprint(filename):
+    """Identify exactly which model file is being served: SHA-256 of its bytes + modified time.
+
+    The notebook can compute the same hash for a file in Models/, so anyone can check that
+    the predictions shown in the UI come from that specific trained model.
+    """
+    path = MODEL_DIR / filename
+    return {
+        "file": filename,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest()[:12],
+        "modified_utc": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
 # Baseline: GradientBoostingClassifier trained on one-hot features (needs model_features.joblib).
-baseline_model = _load("fitcheck_gb_model.joblib")
+baseline_model = _load(MODEL_FILES["baseline"])
 baseline_features = _load("model_features.joblib") or []
 # Optimized: full sklearn Pipeline that takes the raw inputs directly (created by the notebook).
-optimized_model = _load("fitcheck_gb_model_optimized.joblib")
+optimized_model = _load(MODEL_FILES["optimized"])
 
 MODELS = {
     name: model
     for name, model in {"baseline": baseline_model, "optimized": optimized_model}.items()
     if model is not None
 }
+# Fingerprint + estimator type of every loaded model (computed once at startup)
+MODEL_INFO = {
+    name: {**_fingerprint(MODEL_FILES[name]), "estimator": type(model).__name__}
+    for name, model in MODELS.items()
+}
+for name, info in MODEL_INFO.items():
+    log.info("[fitcheck] loaded %s model: %s", name, info)
 
 
 class PredictionInput(BaseModel):
@@ -70,8 +103,8 @@ def health_check():
 
 @app.get("/models")
 def list_models():
-    """Models the UI can choose from, plus the valid input ranges."""
-    return {"available_models": list(MODELS), "bounds": BOUNDS, "classes": CLASS_LABELS}
+    """Models the UI can choose from, which file each one is, plus the valid input ranges."""
+    return {"available_models": list(MODELS), "models": MODEL_INFO, "bounds": BOUNDS, "classes": CLASS_LABELS}
 
 
 @app.post("/predict")
@@ -87,10 +120,19 @@ def predict(data: PredictionInput):
     model_input = build_baseline_features(raw, baseline_features) if data.model == "baseline" else raw
 
     # 3. Predict class & probability of every class (ordered by model.classes_)
+    t0 = time.perf_counter()
     probabilities = model.predict_proba(model_input)[0]
+    inference_ms = (time.perf_counter() - t0) * 1000
     class_ids = [int(c) for c in model.classes_]
     best = int(probabilities.argmax())
     prediction_id = class_ids[best]
+    probs = {CLASS_LABELS.get(cid, str(cid)): round(float(p), 4) for cid, p in zip(class_ids, probabilities)}
+
+    # 4. Audit trail: the exact row the model received and which model file answered
+    model_input_row = {k: (v.item() if hasattr(v, "item") else v) for k, v in model_input.iloc[0].items()}
+    log.info("[fitcheck] predict model=%s sha=%s input=%s -> %s %s (%.1f ms)",
+             data.model, MODEL_INFO[data.model]["sha256"], model_input_row,
+             CLASS_LABELS.get(prediction_id), probs, inference_ms)
 
     return {
         "prediction_class": CLASS_LABELS.get(prediction_id, "Unknown"),
@@ -98,9 +140,11 @@ def predict(data: PredictionInput):
         "raw_class_id": prediction_id,
         "imc_index": round(float(bmi(data.height_cm, data.weight_kg)), 2),
         "model": data.model,
-        "probabilities": {
-            CLASS_LABELS.get(cid, str(cid)): round(float(p), 4) for cid, p in zip(class_ids, probabilities)
-        },
+        "probabilities": probs,
+        # Traceability fields (added; the original fields above are unchanged)
+        "model_info": MODEL_INFO[data.model],
+        "model_input": model_input_row,
+        "inference_ms": round(inference_ms, 2),
     }
 
 

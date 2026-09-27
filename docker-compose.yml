@@ -51,6 +51,8 @@ services:
     working_dir: /app
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5001
+      # The running API (same one the web UI calls); used by the notebook's verification cell
+      FITCHECK_API_URL: http://api:3000
       MODEL_DIR: /app/Models
       PYTHONPATH: /app/src:/app
       # Optional: only needed if Kaggle asks for credentials. Put them in a .env file.

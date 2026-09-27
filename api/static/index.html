@@ -115,6 +115,19 @@
   .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
   .f0 { background: var(--small); } .f1 { background: var(--good); } .f2 { background: var(--large); }
 
+  /* ---------- "Data sent to the model" trace panel ---------- */
+  .trace { margin-top: 16px; border: 1px dashed var(--border); border-radius: 10px; padding: 10px 14px; }
+  .trace summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  .trace summary span { font-weight: 400; color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+  .trace-block { margin-top: 12px; }
+  .trace-block h4 { margin: 0 0 6px; font-size: 13px; text-transform: capitalize; }
+  .trace dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 10px; margin: 0 0 8px; font-size: 12.5px; }
+  .trace dt { color: var(--muted); }
+  .trace dd { margin: 0; overflow-wrap: anywhere; }
+  .trace-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .trace-cols b { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .trace pre { margin: 4px 0 0; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; font-size: 12px; overflow-x: auto; }
+
   .empty { color: var(--muted); text-align: center; padding: 28px 8px; }
   .error { color: var(--small); background: var(--small-bg); padding: 10px 12px; border-radius: 8px; font-size: 14px; }
   .loading { opacity: .55; transition: opacity .2s; }
@@ -219,6 +232,7 @@ const state = {
   garmentId: null, size: null,
   mode: "compare",          // compare | baseline | optimized
   available: [],            // models the API actually loaded
+  traceOpen: false,         // "Data sent to the model" panel expanded?
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -241,25 +255,30 @@ async function checkHealth() {
   syncModelPicker();
 }
 
-// One prediction for one size with one model
+// One prediction for one size with one model. Nothing is cached or precomputed:
+// every verdict on screen is the JSON returned by this live call to the model.
 async function predict(model, chest, garment) {
+  const request = {
+    height_cm: state.height,
+    weight_kg: state.weight,
+    garment_chest_cm: chest,
+    fabric_stretch_pct: garment.stretch,
+    product_type_id: garment.type,
+    model,
+  };
+  const t0 = performance.now();
   const res = await fetch(`${API}/predict`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      height_cm: state.height,
-      weight_kg: state.weight,
-      garment_chest_cm: chest,
-      fabric_stretch_pct: garment.stretch,
-      product_type_id: garment.type,
-      model,
-    }),
+    body: JSON.stringify(request),
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(typeof detail.detail === "string" ? detail.detail : `HTTP ${res.status}`);
   }
-  return res.json();
+  const body = await res.json();
+  // Keep what was sent and how long the round trip took, for the "Data sent to the model" panel
+  return { ...body, _request: request, _roundtrip_ms: performance.now() - t0 };
 }
 
 // Which models to query for the current mode
@@ -321,6 +340,35 @@ function adviceText(garment, chosen, result, best) {
   return `<strong>${chosen} looks ${dir},</strong> and no size of this ${CATEGORY[garment.type].toLowerCase().replace(/s$/, "")} is a clear good fit for you. Try another garment.`;
 }
 
+// "Data sent to the model" panel: proof that the verdicts are live model output.
+// Shows the request body, the feature row the model actually received, and which model file
+// (SHA-256 fingerprint) answered, for the selected size.
+function traceDetails(models, byModel, chosen) {
+  const calls = models.reduce((n, m) => n + byModel[m].length, 0);
+  const json = (o) => esc(JSON.stringify(o, null, 2));
+  return `
+    <details class="trace" ${state.traceOpen ? "open" : ""}>
+      <summary>Data sent to the model <span>${calls} live predictions · ${new Date().toLocaleTimeString()}</span></summary>
+      ${models.map((m) => {
+        const r = byModel[m].find((x) => x.size === chosen);
+        const info = r.model_info || {};
+        return `
+          <div class="trace-block">
+            <h4>${m} · size ${esc(chosen)}</h4>
+            <dl>
+              <dt>Model file</dt><dd>${esc(info.file ?? "?")} (${esc(info.estimator ?? "?")})</dd>
+              <dt>SHA-256</dt><dd><code>${esc(info.sha256 ?? "?")}</code> · saved ${esc(info.modified_utc ?? "?")}</dd>
+              <dt>Timing</dt><dd>model ${r.inference_ms ?? "?"} ms · round trip ${r._roundtrip_ms.toFixed(1)} ms</dd>
+            </dl>
+            <div class="trace-cols">
+              <div><b>POST /predict body</b><pre>${json(r._request)}</pre></div>
+              <div><b>Row the model received</b><pre>${json(r.model_input)}</pre></div>
+            </div>
+          </div>`;
+      }).join("")}
+    </details>`;
+}
+
 let requestSeq = 0; // ignore out-of-order responses when the user changes things quickly
 
 async function evaluate() {
@@ -379,7 +427,8 @@ async function evaluate() {
             ${probBars(r.probabilities)}
           </div>`;
         }).join("")}
-      </div>`;
+      </div>
+      ${traceDetails(models, byModel, chosen)}`;
   } catch (e) {
     if (seq !== requestSeq) return;
     card.innerHTML = `<div class="error">Prediction failed: ${esc(e.message)}</div>`;
@@ -422,6 +471,11 @@ $("result-card").addEventListener("click", (e) => {
   const b = e.target.closest("[data-size]"); if (!b) return;
   state.size = b.dataset.size; evaluate();
 });
+
+// Remember whether the trace panel is open across re-renders ("toggle" does not bubble -> capture)
+$("result-card").addEventListener("toggle", (e) => {
+  if (e.target.classList.contains("trace")) state.traceOpen = e.target.open;
+}, true);
 
 $("model-pick").addEventListener("click", (e) => {
   const b = e.target.closest("[data-mode]"); if (!b || b.disabled) return;
