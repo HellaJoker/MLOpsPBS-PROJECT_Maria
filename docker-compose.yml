@@ -1,14 +1,84 @@
-version: '3.8'
+# FitCheck MLOps stack: one image, three services.
+#   docker compose up -d --build
+#   Jupyter -> http://localhost:8888   MLflow -> http://localhost:5001   API + UI -> http://localhost:3000
+#
+# Ports are bound to 127.0.0.1 only: Jupyter runs without a token, so it must not
+# be reachable from other machines on your network.
+
+x-fitcheck-image: &fitcheck-image
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: fitcheck-mlops:latest
 
 services:
-  mlflow-app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    container_name: container-ml
+  mlflow:
+    <<: *fitcheck-image
+    container_name: fitcheck-mlflow
+    # `mlflow db upgrade` migrates an existing DB (e.g. one created by another MLflow
+    # version in Colab) to this image's schema; it is skipped on a fresh start because
+    # the server creates new DBs itself. A backup is kept in db/mlflow.db.pre-docker.bak.
+    # (All lines share one indent so YAML folds them into a single shell line.)
+    command: >
+      sh -c "if [ -f /app/db/mlflow.db ]; then mlflow db upgrade sqlite:////app/db/mlflow.db; fi &&
+      exec mlflow server --host 0.0.0.0 --port 5001
+      --backend-store-uri sqlite:////app/db/mlflow.db
+      --artifacts-destination /app/artifacts
+      --serve-artifacts"
+    environment:
+      # MLflow >= 3.5 rejects unknown Host headers. Jupyter/API reach it as "mlflow:5001".
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,mlflow:5001,localhost,localhost:5001,127.0.0.1,127.0.0.1:5001"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:5001:5001"
     volumes:
       # Sincroniza o banco de dados e a pasta de artefatos com sua máquina local
       - ./db:/app/db
       - ./artifacts:/app/artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  jupyter:
+    <<: *fitcheck-image
+    container_name: fitcheck-jupyter
+    command: >
+      jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+      --ServerApp.token='' --ServerApp.password=''
+      --ServerApp.root_dir=/app
+    working_dir: /app
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5001
+      MODEL_DIR: /app/Models
+      PYTHONPATH: /app/src:/app
+      # Optional: only needed if Kaggle asks for credentials. Put them in a .env file.
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME:-}
+      KAGGLE_KEY: ${KAGGLE_KEY:-}
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      # The whole project is mounted so notebooks and retrained models persist on your machine.
+      - .:/app
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/api')"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  api:
+    <<: *fitcheck-image
+    container_name: fitcheck-api
+    # Uses the image's default CMD (uvicorn on port 3000) and HEALTHCHECK.
+    environment:
+      MODEL_DIR: /app/Models
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # Read-only: models retrained in Jupyter are served after `docker compose restart api`.
+      - ./Models:/app/Models:ro

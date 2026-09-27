@@ -1,0 +1,9 @@
+# Keep the build context small: these are mounted as volumes at runtime, not baked in.
+.git
+db/
+artifacts/
+data/
+Notebooks/
+**/__pycache__
+**/.ipynb_checkpoints
+.env

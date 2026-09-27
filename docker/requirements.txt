@@ -1,5 +1,21 @@
-mlflow
-scikit-learn
+# --- ML stack ---
+# scikit-learn is pinned to the version the committed Models/*.joblib were pickled with.
+# Changing it can make joblib.load fail or warn (InconsistentVersionWarning).
+scikit-learn==1.6.1
 pandas
+numpy
 joblib
-flask  # ou fastapi, dependendo do framework usado no app.py
+
+# --- Experiment tracking ---
+# Pinned so the server schema in db/mlflow.db does not drift between rebuilds.
+mlflow==3.16.1
+
+# --- Notebook server (port 8888) ---
+jupyterlab
+ipykernel
+kagglehub
+
+# --- Inference API (port 3000) ---
+fastapi
+uvicorn[standard]
+httpx  # required by fastapi.testclient.TestClient used in the notebook

@@ -2,5 +2,9 @@ __pycache__/
 *.pyc
 .env
 db/mlflow.db
+db/*.bak
+.ipynb_checkpoints/
+# Kaggle CSV downloaded by the notebook
+data/
 # Remova o símbolo '#' da linha abaixo se os arquivos da pasta artifacts forem maiores que 50MB
 # artifacts/

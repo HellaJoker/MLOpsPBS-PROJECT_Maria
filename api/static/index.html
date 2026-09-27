@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FitCheck Fitting Room</title>
+<style>
+  /* ---------- Design tokens (light / dark) ---------- */
+  :root {
+    --bg: #f6f5f2; --surface: #ffffff; --surface-2: #efede8; --border: #dedad2;
+    --text: #1d1c1a; --muted: #6b6760; --accent: #2f5d50; --accent-contrast: #ffffff;
+    --small: #b4541a; --small-bg: #fbeee4;
+    --good: #2f7d4f;  --good-bg: #e6f3eb;
+    --large: #2b5f9e; --large-bg: #e6eef8;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+    --radius: 12px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151514; --surface: #1e1e1c; --surface-2: #282825; --border: #363631;
+      --text: #ecebe7; --muted: #a09c93; --accent: #7fbfa8; --accent-contrast: #10201b;
+      --small: #f0a070; --small-bg: #3a2618; --good: #7fcf9b; --good-bg: #1b3325;
+      --large: #8db6ea; --large-bg: #1a2a40; --shadow: none; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151514; --surface: #1e1e1c; --surface-2: #282825; --border: #363631;
+    --text: #ecebe7; --muted: #a09c93; --accent: #7fbfa8; --accent-contrast: #10201b;
+    --small: #f0a070; --small-bg: #3a2618; --good: #7fcf9b; --good-bg: #1b3325;
+    --large: #8db6ea; --large-bg: #1a2a40; --shadow: none; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  button, input { font: inherit; color: inherit; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  /* ---------- Header ---------- */
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+  .brand span { color: var(--muted); font-size: 14px; }
+  .status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+            background: var(--surface); border: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--good); } .dot.err { background: var(--small); }
+
+  /* ---------- Layout ---------- */
+  .grid { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; }
+  .card h2 { margin: 0 0 14px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .stack > * + * { margin-top: 20px; }
+
+  /* ---------- Measurements ---------- */
+  .field { margin-bottom: 16px; }
+  .field-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .field label { font-weight: 600; }
+  .num { display: inline-flex; align-items: baseline; gap: 4px; }
+  .num input { width: 64px; text-align: right; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
+  .num small { color: var(--muted); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .bmi { display: flex; justify-content: space-between; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); font-size: 14px; }
+  .bmi b { font-variant-numeric: tabular-nums; }
+  .model-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .model-pick button { padding: 8px 4px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; font-size: 13px; }
+  .model-pick button[aria-pressed="true"] { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+  .model-pick button:disabled { opacity: .45; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+
+  /* ---------- Catalog ---------- */
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chip { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 13px; }
+  .chip[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .item { text-align: left; padding: 12px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); cursor: pointer; transition: border-color .15s, transform .15s; }
+  .item:hover { border-color: var(--muted); }
+  .item[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+  .swatch { height: 86px; border-radius: 8px; display: grid; place-items: center; margin-bottom: 10px; }
+  .swatch svg { width: 58px; height: 58px; }
+  .item b { display: block; font-size: 14px; line-height: 1.3; }
+  .item small { color: var(--muted); font-size: 12px; }
+
+  /* ---------- Size + result ---------- */
+  .sizes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .size { min-width: 58px; padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--border); background: var(--surface); cursor: pointer; text-align: center; }
+  .size b { display: block; }
+  .size small { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .size[aria-pressed="true"] { border-color: var(--text); background: var(--surface-2); }
+  .size .tag { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; border-radius: 4px; padding: 1px 0; }
+  .t0 { color: var(--small); background: var(--small-bg); }
+  .t1 { color: var(--good);  background: var(--good-bg); }
+  .t2 { color: var(--large); background: var(--large-bg); }
+  .size.best { border-color: var(--good); }
+
+  .selected-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; margin-bottom: 14px; }
+  .selected-head h3 { margin: 0; font-size: 18px; }
+  .selected-head .meta { color: var(--muted); font-size: 13px; }
+
+  .advice { margin-top: 16px; padding: 14px 16px; border-radius: 10px; font-weight: 500; }
+  .advice.t0, .advice.t1, .advice.t2 { font-weight: 500; }
+  .advice strong { font-weight: 700; }
+
+  .verdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 16px; }
+  .verdict { border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .verdict .who { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .verdict .label { font-size: 22px; font-weight: 700; margin: 2px 0 10px; }
+  .bar { display: grid; grid-template-columns: 76px 1fr 44px; gap: 8px; align-items: center; font-size: 12.5px; margin: 4px 0; }
+  .bar .track { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 4px; transition: width .35s ease; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .f0 { background: var(--small); } .f1 { background: var(--good); } .f2 { background: var(--large); }
+
+  .empty { color: var(--muted); text-align: center; padding: 28px 8px; }
+  .error { color: var(--small); background: var(--small-bg); padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+  .loading { opacity: .55; transition: opacity .2s; }
+  footer { color: var(--muted); font-size: 12.5px; margin-top: 24px; }
+  footer code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><h1>FitCheck</h1><span>Fitting room</span></div>
+    <div class="status" id="status"><span class="dot"></span><span>Connecting to API…</span></div>
+  </header>
+
+  <div class="grid">
+    <!-- ================= Left: the shopper ================= -->
+    <aside class="stack">
+      <section class="card">
+        <h2>Your measurements</h2>
+        <div class="field">
+          <div class="field-top"><label for="height">Height</label>
+            <span class="num"><input id="height-num" type="number" min="140" max="220" step="1" aria-label="Height in cm"><small>cm</small></span></div>
+          <input id="height" type="range" min="140" max="220" step="1">
+        </div>
+        <div class="field">
+          <div class="field-top"><label for="weight">Weight</label>
+            <span class="num"><input id="weight-num" type="number" min="40" max="150" step="1" aria-label="Weight in kg"><small>kg</small></span></div>
+          <input id="weight" type="range" min="40" max="150" step="1">
+        </div>
+        <div class="bmi"><span>BMI</span><b id="bmi">–</b></div>
+      </section>
+
+      <section class="card">
+        <h2>Model</h2>
+        <div class="model-pick" id="model-pick">
+          <button data-mode="compare" aria-pressed="true">Compare</button>
+          <button data-mode="baseline" aria-pressed="false">Baseline</button>
+          <button data-mode="optimized" aria-pressed="false">Optimized</button>
+        </div>
+        <p class="hint" id="model-hint"></p>
+      </section>
+    </aside>
+
+    <!-- ================= Right: shop + feedback ================= -->
+    <main class="stack">
+      <section class="card">
+        <h2>Pick a garment</h2>
+        <div class="filters" id="filters"></div>
+        <div class="catalog" id="catalog"></div>
+      </section>
+
+      <section class="card" id="result-card" aria-live="polite">
+        <div class="empty">Select a garment to see how it fits.</div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    Predictions come from <code>POST /predict</code> on this FitCheck API. Labels are learned from a synthetic sizing rule, so treat them as a demo of the model, not real tailoring advice.
+  </footer>
+</div>
+
+<script>
+/* =====================================================================
+   FitCheck fitting room: talks to the FastAPI service that serves this page.
+   ===================================================================== */
+
+// Relative URLs: the page is served by the API itself (http://localhost:3000/).
+const API = "";
+
+const CLASS = { 0: "Too Small", 1: "Good Fit", 2: "Too Large" };
+const CATEGORY = { 0: "Tops", 1: "Bottoms", 2: "Jackets" };
+
+// ---------------------------------------------------------------------
+// Demo catalog. `chest` is the garment circumference in cm (the model's
+// garment_chest_cm) and `stretch` is fabric_stretch_pct.
+// ---------------------------------------------------------------------
+const CATALOG = [
+  { id: "tee",     name: "Classic Cotton Tee",     type: 0, stretch: 3,  color: "#d9e4dd", sizes: { XS: 84, S: 90, M: 96, L: 102, XL: 108, XXL: 116 } },
+  { id: "run",     name: "Performance Run Shirt",  type: 0, stretch: 15, color: "#dfe3f0", sizes: { XS: 80, S: 86, M: 92, L: 98, XL: 104, XXL: 110 } },
+  { id: "oxford",  name: "Oxford Button-Down",     type: 0, stretch: 1,  color: "#e9e1d3", sizes: { S: 94, M: 100, L: 106, XL: 112, XXL: 120 } },
+  { id: "jeans",   name: "Slim Stretch Jeans",     type: 1, stretch: 8,  color: "#d6dfea", sizes: { S: 86, M: 92, L: 98, XL: 104, XXL: 112 } },
+  { id: "chino",   name: "Relaxed Chinos",         type: 1, stretch: 2,  color: "#ece3cf", sizes: { S: 90, M: 96, L: 102, XL: 108, XXL: 116 } },
+  { id: "denim",   name: "Denim Trucker Jacket",   type: 2, stretch: 2,  color: "#d3dce8", sizes: { S: 98, M: 104, L: 110, XL: 116, XXL: 124 } },
+  { id: "coat",    name: "Wool Overcoat",          type: 2, stretch: 0,  color: "#e2dcd6", sizes: { S: 102, M: 108, L: 114, XL: 120, XXL: 128 } },
+  { id: "puffer",  name: "Light Puffer",           type: 2, stretch: 4,  color: "#e6e0ee", sizes: { S: 100, M: 106, L: 112, XL: 118, XXL: 126 } },
+];
+
+// Simple line icons per category (inline SVG, inherits the text color)
+const ICONS = {
+  0: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M22 8l-14 8 6 12 6-3v31h24V25l6 3 6-12-14-8c-2 5-6 7-10 7s-8-2-10-7z"/></svg>',
+  1: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M18 6h28l4 52H37l-5-32-5 32H14z"/><path d="M18 13h28"/></svg>',
+  2: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M24 7l-14 7-4 42h14V30M40 7l14 7 4 42H44V30"/><path d="M24 7l8 12 8-12M32 19v37M20 56h24"/></svg>',
+};
+
+// ---------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------
+const state = {
+  height: 175, weight: 72,
+  filter: "all",
+  garmentId: null, size: null,
+  mode: "compare",          // compare | baseline | optimized
+  available: [],            // models the API actually loaded
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ---------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------
+async function checkHealth() {
+  const el = $("status");
+  try {
+    const res = await fetch(`${API}/models`);
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    state.available = data.available_models;
+    el.innerHTML = `<span class="dot ok"></span><span>API online · ${state.available.length ? esc(state.available.join(" + ")) : "no models loaded"}</span>`;
+  } catch (e) {
+    state.available = [];
+    el.innerHTML = `<span class="dot err"></span><span>API offline</span>`;
+  }
+  syncModelPicker();
+}
+
+// One prediction for one size with one model
+async function predict(model, chest, garment) {
+  const res = await fetch(`${API}/predict`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      height_cm: state.height,
+      weight_kg: state.weight,
+      garment_chest_cm: chest,
+      fabric_stretch_pct: garment.stretch,
+      product_type_id: garment.type,
+      model,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(typeof detail.detail === "string" ? detail.detail : `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// Which models to query for the current mode
+function activeModels() {
+  if (state.mode === "compare") return state.available.slice();
+  return state.available.includes(state.mode) ? [state.mode] : state.available.slice(0, 1);
+}
+
+// ---------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------
+function renderFilters() {
+  const opts = [["all", "All"], ...Object.entries(CATEGORY)];
+  $("filters").innerHTML = opts.map(([k, v]) =>
+    `<button class="chip" data-filter="${k}" aria-pressed="${state.filter === k}">${v}</button>`).join("");
+}
+
+function renderCatalog() {
+  const items = CATALOG.filter((g) => state.filter === "all" || String(g.type) === state.filter);
+  $("catalog").innerHTML = items.map((g) => `
+    <button class="item" data-id="${g.id}" aria-pressed="${state.garmentId === g.id}">
+      <div class="swatch" style="background:${g.color};color:#2b2a27">${ICONS[g.type]}</div>
+      <b>${esc(g.name)}</b>
+      <small>${CATEGORY[g.type]} · ${g.stretch}% stretch</small>
+    </button>`).join("");
+}
+
+function syncModelPicker() {
+  document.querySelectorAll("#model-pick button").forEach((b) => {
+    const m = b.dataset.mode;
+    b.disabled = m === "compare" ? state.available.length < 2 : !state.available.includes(m);
+    b.setAttribute("aria-pressed", String(state.mode === m));
+  });
+  // Fall back to whatever is available (e.g. optimized model not trained yet)
+  if (state.available.length && document.querySelector(`#model-pick [data-mode="${state.mode}"]`).disabled) {
+    state.mode = state.available.length > 1 ? "compare" : state.available[0];
+    return syncModelPicker();
+  }
+  $("model-hint").textContent = state.available.includes("optimized")
+    ? "Compare shows the baseline and optimized model side by side."
+    : "Optimized model not found. Run the notebook's optimized cell, then `docker compose restart api`.";
+}
+
+function probBars(p) {
+  return [0, 1, 2].map((k) => {
+    const v = p[CLASS[k]] ?? 0;
+    return `<div class="bar"><span>${CLASS[k]}</span><div class="track"><div class="fill f${k}" style="width:${(v * 100).toFixed(1)}%"></div></div><span class="pct">${Math.round(v * 100)}%</span></div>`;
+  }).join("");
+}
+
+// Sentence the shopper actually reads
+function adviceText(garment, chosen, result, best) {
+  const cls = result.raw_class_id;
+  if (cls === 1) return `<strong>${chosen} should fit you well.</strong> The model is ${Math.round(result.confidence * 100)}% confident.`;
+  const dir = cls === 0 ? "too small" : "too large";
+  if (best && best.size !== chosen) {
+    return `<strong>${chosen} looks ${dir}.</strong> Try <strong>${best.size}</strong> instead (${Math.round(best.pGood * 100)}% chance of a good fit).`;
+  }
+  return `<strong>${chosen} looks ${dir},</strong> and no size of this ${CATEGORY[garment.type].toLowerCase().replace(/s$/, "")} is a clear good fit for you. Try another garment.`;
+}
+
+let requestSeq = 0; // ignore out-of-order responses when the user changes things quickly
+
+async function evaluate() {
+  const card = $("result-card");
+  const garment = CATALOG.find((g) => g.id === state.garmentId);
+  if (!garment) return;
+  if (!state.available.length) {
+    card.innerHTML = `<div class="error">The API has no models loaded (or is offline). Check <code>docker compose ps</code>.</div>`;
+    return;
+  }
+  const seq = ++requestSeq;
+  card.classList.add("loading");
+
+  const models = activeModels();
+  const primary = models.includes("optimized") ? "optimized" : models[0]; // drives the size advisor
+  const sizes = Object.entries(garment.sizes);
+
+  try {
+    // Score every size with every active model (a handful of small requests)
+    const results = await Promise.all(models.map(async (m) => {
+      const perSize = await Promise.all(sizes.map(([size, chest]) => predict(m, chest, garment).then((r) => ({ size, chest, ...r }))));
+      return [m, perSize];
+    }));
+    if (seq !== requestSeq) return;
+    const byModel = Object.fromEntries(results);
+
+    // Size advisor: the size with the highest P(Good Fit) according to the primary model
+    const advisor = byModel[primary].map((r) => ({ size: r.size, pGood: r.probabilities["Good Fit"] ?? 0, cls: r.raw_class_id }));
+    const bestCandidate = advisor.reduce((a, b) => (b.pGood > a.pGood ? b : a));
+    const best = bestCandidate.pGood >= 0.5 ? bestCandidate : null;
+    // Start where a shopper usually starts (M), then let the advisor suggest a better size
+    const chosen = state.size && garment.sizes[state.size] ? state.size : ("M" in garment.sizes ? "M" : sizes[0][0]);
+    state.size = chosen;
+    const chosenPrimary = byModel[primary].find((r) => r.size === chosen);
+
+    card.innerHTML = `
+      <div class="selected-head">
+        <h3>${esc(garment.name)}</h3>
+        <span class="meta">${CATEGORY[garment.type]} · ${garment.stretch}% stretch · size ${chosen} = ${garment.sizes[chosen]} cm</span>
+      </div>
+      <h2>Size advisor${models.length > 1 ? ` <span style="text-transform:none;letter-spacing:0">(${primary} model)</span>` : ""}</h2>
+      <div class="sizes" role="group" aria-label="Sizes">
+        ${advisor.map((a) => `
+          <button class="size ${best && a.size === best.size ? "best" : ""}" data-size="${a.size}" aria-pressed="${a.size === chosen}">
+            <b>${a.size}</b><small>${garment.sizes[a.size]} cm</small>
+            <span class="tag t${a.cls}">${CLASS[a.cls]}</span>
+          </button>`).join("")}
+      </div>
+      <div class="advice t${chosenPrimary.raw_class_id}">${adviceText(garment, chosen, chosenPrimary, best)}</div>
+      <div class="verdicts">
+        ${models.map((m) => {
+          const r = byModel[m].find((x) => x.size === chosen);
+          return `<div class="verdict">
+            <div class="who">${m === "optimized" ? "Optimized model" : "Baseline model"}</div>
+            <div class="label" style="color:var(--${["small", "good", "large"][r.raw_class_id]})">${CLASS[r.raw_class_id]}</div>
+            ${probBars(r.probabilities)}
+          </div>`;
+        }).join("")}
+      </div>`;
+  } catch (e) {
+    if (seq !== requestSeq) return;
+    card.innerHTML = `<div class="error">Prediction failed: ${esc(e.message)}</div>`;
+  } finally {
+    if (seq === requestSeq) card.classList.remove("loading");
+  }
+}
+
+// ---------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------
+let debounce;
+function setBody(key, value) {
+  const [min, max] = key === "height" ? [140, 220] : [40, 150];
+  const v = Math.min(max, Math.max(min, Number(value) || min)); // same bounds the API enforces
+  state[key] = v;
+  $(key).value = v; $(`${key}-num`).value = v;
+  $("bmi").textContent = (state.weight / (state.height / 100) ** 2).toFixed(1);
+  clearTimeout(debounce);
+  debounce = setTimeout(evaluate, 250);
+}
+
+["height", "weight"].forEach((k) => {
+  $(k).addEventListener("input", (e) => setBody(k, e.target.value));
+  $(`${k}-num`).addEventListener("change", (e) => setBody(k, e.target.value));
+});
+
+$("filters").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-filter]"); if (!b) return;
+  state.filter = b.dataset.filter; renderFilters(); renderCatalog();
+});
+
+$("catalog").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-id]"); if (!b) return;
+  if (state.garmentId !== b.dataset.id) state.size = null; // new garment: let the advisor pick
+  state.garmentId = b.dataset.id; renderCatalog(); evaluate();
+});
+
+$("result-card").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-size]"); if (!b) return;
+  state.size = b.dataset.size; evaluate();
+});
+
+$("model-pick").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]"); if (!b || b.disabled) return;
+  state.mode = b.dataset.mode; syncModelPicker(); evaluate();
+});
+
+// ---------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------
+renderFilters();
+renderCatalog();
+setBody("height", state.height);
+setBody("weight", state.weight);
+checkHealth();
+</script>
+</body>
+</html>
